@@ -49,7 +49,6 @@
   .stage { display: none; }
   .stage.active { display: block; }
 
-  /* Upload area */
   .drop-zone {
     border: 2px dashed var(--border);
     border-radius: var(--radius);
@@ -78,159 +77,87 @@
     border-radius: 8px;
     overflow: hidden;
   }
-  .previews .thumb img {
-    width: 100%;
-    height: 100%;
-    object-fit: cover;
-  }
+  .previews .thumb img { width: 100%; height: 100%; object-fit: cover; }
   .previews .thumb .remove {
-    position: absolute;
-    top: 2px;
-    right: 2px;
-    width: 20px;
-    height: 20px;
-    border-radius: 50%;
-    background: rgba(0,0,0,0.7);
-    color: #fff;
-    border: none;
-    font-size: 12px;
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    line-height: 1;
+    position: absolute; top: 2px; right: 2px;
+    width: 20px; height: 20px; border-radius: 50%;
+    background: rgba(0,0,0,0.7); color: #fff; border: none;
+    font-size: 12px; cursor: pointer;
+    display: flex; align-items: center; justify-content: center; line-height: 1;
   }
 
   label.field { display: block; margin-top: 20px; font-size: 0.85rem; color: var(--muted); margin-bottom: 6px; }
   textarea {
-    width: 100%;
-    padding: 12px 14px;
-    border-radius: var(--radius);
-    border: 1px solid var(--border);
-    background: var(--surface);
-    color: var(--text);
-    font-size: 0.95rem;
-    resize: vertical;
-    min-height: 80px;
-    font-family: inherit;
+    width: 100%; padding: 12px 14px; border-radius: var(--radius);
+    border: 1px solid var(--border); background: var(--surface);
+    color: var(--text); font-size: 0.95rem; resize: vertical;
+    min-height: 80px; font-family: inherit;
   }
   textarea:focus { outline: none; border-color: var(--accent); }
 
   .btn {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    padding: 12px 28px;
-    border: none;
-    border-radius: var(--radius);
-    font-size: 0.95rem;
-    font-weight: 500;
-    cursor: pointer;
-    transition: background 0.2s;
+    display: inline-flex; align-items: center; justify-content: center;
+    padding: 12px 28px; border: none; border-radius: var(--radius);
+    font-size: 0.95rem; font-weight: 500; cursor: pointer; transition: background 0.2s;
   }
   .btn-primary { background: var(--accent); color: #fff; }
   .btn-primary:hover { background: var(--accent-hover); }
   .btn-primary:disabled { opacity: 0.4; cursor: not-allowed; }
   .btn-danger { background: var(--danger); color: #fff; }
   .btn-danger:hover { background: var(--danger-hover); }
-  .btn-secondary {
-    background: transparent;
-    color: var(--muted);
-    border: 1px solid var(--border);
-  }
+  .btn-secondary { background: transparent; color: var(--muted); border: 1px solid var(--border); }
   .btn-secondary:hover { border-color: var(--muted); color: var(--text); }
 
   .actions { margin-top: 24px; display: flex; gap: 12px; }
 
-  /* Suggestion card */
   .suggestion-card {
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
-    padding: 24px;
-    margin-bottom: 20px;
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 24px; margin-bottom: 20px;
   }
   .suggestion-card h3 { font-size: 1.2rem; margin-bottom: 8px; }
   .suggestion-card .style-name { color: var(--accent); }
   .suggestion-card .desc { color: var(--muted); font-size: 0.9rem; margin-bottom: 12px; line-height: 1.5; }
   .suggestion-card .reasoning { font-size: 0.9rem; line-height: 1.5; padding: 12px; background: rgba(108,92,231,0.08); border-radius: 8px; }
 
-  /* Story card */
   .story-card {
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
-    margin-bottom: 20px;
-    overflow: hidden;
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: var(--radius); margin-bottom: 20px; overflow: hidden;
   }
   .story-card summary {
-    padding: 14px 20px;
-    cursor: pointer;
-    font-size: 0.95rem;
-    font-weight: 500;
-    color: var(--text);
-    list-style: none;
-    display: flex;
-    align-items: center;
-    gap: 8px;
+    padding: 14px 20px; cursor: pointer; font-size: 0.95rem; font-weight: 500;
+    color: var(--text); list-style: none; display: flex; align-items: center; gap: 8px;
   }
   .story-card summary::-webkit-details-marker { display: none; }
   .story-card summary::before { content: "\25B6"; font-size: 0.7rem; color: var(--muted); transition: transform 0.2s; }
   .story-card[open] summary::before { transform: rotate(90deg); }
   .story-card .story-title { color: var(--accent); }
-  .story-body {
-    padding: 0 20px 16px;
-    font-size: 0.85rem;
-    color: var(--muted);
-    line-height: 1.6;
-  }
+  .story-body { padding: 0 20px 16px; font-size: 0.85rem; color: var(--muted); line-height: 1.6; }
   .story-body pre {
-    background: var(--bg);
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    padding: 12px;
-    overflow-x: auto;
-    white-space: pre-wrap;
-    word-break: break-word;
-    font-family: "SF Mono", "Fira Code", monospace;
-    font-size: 0.8rem;
-    color: var(--text);
+    background: var(--bg); border: 1px solid var(--border); border-radius: 8px;
+    padding: 12px; overflow-x: auto; white-space: pre-wrap; word-break: break-word;
+    font-family: "SF Mono", "Fira Code", monospace; font-size: 0.8rem; color: var(--text);
   }
 
-  /* Result */
   .result-container { text-align: center; }
   .result-container img {
-    max-width: 100%;
-    max-height: 70vh;
-    border-radius: var(--radius);
-    border: 1px solid var(--border);
+    max-width: 100%; max-height: 70vh;
+    border-radius: var(--radius); border: 1px solid var(--border);
   }
   .timing { margin-top: 12px; font-size: 0.85rem; color: var(--muted); }
 
-  /* Spinner */
   .spinner-wrapper { text-align: center; padding: 60px 0; }
   .spinner {
-    width: 40px;
-    height: 40px;
-    border: 3px solid var(--border);
-    border-top-color: var(--accent);
-    border-radius: 50%;
-    animation: spin 0.8s linear infinite;
-    margin: 0 auto 16px;
+    width: 40px; height: 40px;
+    border: 3px solid var(--border); border-top-color: var(--accent);
+    border-radius: 50%; animation: spin 0.8s linear infinite; margin: 0 auto 16px;
   }
   @keyframes spin { to { transform: rotate(360deg); } }
   .spinner-wrapper p { color: var(--muted); font-size: 0.9rem; }
 
-  /* Error */
   .error-msg {
-    background: rgba(231, 76, 92, 0.1);
-    border: 1px solid var(--danger);
-    color: var(--danger);
-    padding: 12px 16px;
-    border-radius: var(--radius);
-    font-size: 0.9rem;
-    margin-top: 16px;
-    display: none;
+    background: rgba(231, 76, 92, 0.1); border: 1px solid var(--danger);
+    color: var(--danger); padding: 12px 16px; border-radius: var(--radius);
+    font-size: 0.9rem; margin-top: 16px; display: none;
   }
 </style>
 </head>
@@ -264,7 +191,7 @@
   <section id="stage-suggest" class="stage">
     <div id="suggestLoading" class="spinner-wrapper">
       <div class="spinner"></div>
-      <p>Analyzing your photos...</p>
+      <p>Generating story & analyzing your photos...</p>
     </div>
     <div id="suggestResult" style="display:none">
       <details class="story-card" id="storyCard" style="display:none">
@@ -309,14 +236,26 @@
   const fileInput = $("#fileInput");
   const previewsEl = $("#previews");
   const btnSuggest = $("#btnSuggest");
-  let selectedFiles = [];
-  let sessionId = null;
-  let currentStyle = null;
 
-  // ---------- Stage management ----------
+  let selectedFiles = [];
+  let currentStyle = null;
+  let excludedStyles = [];
+
   function showStage(name) {
     document.querySelectorAll(".stage").forEach(s => s.classList.remove("active"));
     $(`#stage-${name}`).classList.add("active");
+  }
+
+  function buildFormData(extras) {
+    const fd = new FormData();
+    fd.append("summary", $("#summary").value);
+    selectedFiles.forEach(f => fd.append("images", f));
+    if (extras) {
+      for (const [k, v] of Object.entries(extras)) {
+        fd.append(k, typeof v === "string" ? v : JSON.stringify(v));
+      }
+    }
+    return fd;
   }
 
   // ---------- File handling ----------
@@ -359,21 +298,18 @@
   // ---------- Suggest ----------
   btnSuggest.addEventListener("click", async () => {
     hideError("uploadError");
+    excludedStyles = [];
     showStage("suggest");
     $("#suggestLoading").style.display = "";
     $("#suggestResult").style.display = "none";
 
-    const fd = new FormData();
-    fd.append("summary", $("#summary").value);
-    selectedFiles.forEach(f => fd.append("images", f));
-
     try {
-      const res = await fetch("/api/suggest", { method: "POST", body: fd });
+      const res = await fetch("/api/suggest", { method: "POST", body: buildFormData() });
       const data = await res.json();
       if (data.error) throw new Error(data.error);
 
-      sessionId = data.session_id;
       currentStyle = data.suggestion.style_name;
+      excludedStyles.push(currentStyle);
       $("#styleName").textContent = data.suggestion.style_name;
       $("#styleDesc").textContent = data.style_description;
       $("#styleReason").textContent = data.suggestion.reasoning;
@@ -403,8 +339,7 @@
     try {
       const res = await fetch("/api/reject", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ session_id: sessionId }),
+        body: buildFormData({ excluded: excludedStyles }),
       });
       const data = await res.json();
       if (data.exhausted) {
@@ -416,6 +351,7 @@
       if (data.error) throw new Error(data.error);
 
       currentStyle = data.suggestion.style_name;
+      excludedStyles.push(currentStyle);
       $("#styleName").textContent = data.suggestion.style_name;
       $("#styleDesc").textContent = data.style_description;
       $("#styleReason").textContent = data.suggestion.reasoning;
@@ -439,14 +375,14 @@
     try {
       const res = await fetch("/api/generate", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ session_id: sessionId, style_name: currentStyle }),
+        body: buildFormData({ style_name: currentStyle }),
       });
       const data = await res.json();
       if (data.error) throw new Error(data.error);
 
-      $("#resultImg").src = data.image_url + "?t=" + Date.now();
-      $("#downloadLink").href = data.image_url;
+      const imgSrc = "data:image/png;base64," + data.image_base64;
+      $("#resultImg").src = imgSrc;
+      $("#downloadLink").href = imgSrc;
       $("#genTiming").textContent = `Generated in ${data.generation_time}s (total ${data.total_time}s)`;
       $("#genLoading").style.display = "none";
       $("#genResult").style.display = "";
@@ -462,15 +398,14 @@
 
   function resetAll() {
     selectedFiles = [];
-    sessionId = null;
     currentStyle = null;
+    excludedStyles = [];
     previewsEl.innerHTML = "";
     $("#summary").value = "";
     btnSuggest.disabled = true;
     showStage("upload");
   }
 
-  // ---------- Errors ----------
   function showError(id, msg) { const el = $(`#${id}`); el.textContent = msg; el.style.display = "block"; }
   function hideError(id) { $(`#${id}`).style.display = "none"; }
 </script>

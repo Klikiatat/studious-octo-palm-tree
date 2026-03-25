@@ -1,11 +1,11 @@
+import base64
 import io
 import json
 import os
 import time
-import uuid
 
 from dotenv import load_dotenv
-from flask import Flask, jsonify, request, render_template, send_from_directory
+from flask import Flask, jsonify, request, render_template
 from google import genai
 from google.genai import types
 from PIL import Image
@@ -13,16 +13,11 @@ from PIL import Image
 load_dotenv()
 
 app = Flask(__name__)
-app.secret_key = os.urandom(24)
 
 client = genai.Client(api_key=os.environ["GEMINI_API_KEY"])
 
-UPLOAD_DIR = os.path.join("static", "uploads")
-OUTPUT_DIR = os.path.join("static", "outputs")
-os.makedirs(UPLOAD_DIR, exist_ok=True)
-os.makedirs(OUTPUT_DIR, exist_ok=True)
-
-with open("styles.json") as f:
+STYLES_PATH = os.path.join(os.path.dirname(__file__), "styles.json")
+with open(STYLES_PATH) as f:
     STYLES = json.load(f)
 STYLE_MAP = {s["name"]: s for s in STYLES}
 
@@ -30,15 +25,16 @@ from storyAgent import prompt as STORY_PROMPT
 
 STORY_STYLES_REQUIRING_NARRATIVE = {"Junk Journal", "Comic Strip"}
 
-sessions: dict = {}
-
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
-def compress_image(path, max_size=(1024, 1024), quality=80):
-    img = Image.open(path)
+def compress_image_from_file(file_storage, max_size=(1024, 1024), quality=80):
+    """Compress an uploaded file (werkzeug FileStorage) and return a PIL Image."""
+    img = Image.open(file_storage.stream)
+    if img.mode == "RGBA":
+        img = img.convert("RGB")
     original_size = img.size
     img.thumbnail(max_size, Image.LANCZOS)
     buf = io.BytesIO()
@@ -49,6 +45,14 @@ def compress_image(path, max_size=(1024, 1024), quality=80):
     compressed_img.load()
     print(f"[compress] {original_size} -> {compressed_img.size}, {compressed_kb:.1f} KB")
     return compressed_img
+
+
+def _compress_uploaded_images(files):
+    """Compress a list of uploaded files and return PIL images + timing."""
+    t = time.time()
+    images = [compress_image_from_file(f) for f in files]
+    print(f"[time] Compression ({len(files)} images): {time.time() - t:.2f}s")
+    return images
 
 
 def generate_story(images, summary, style_hint=None):
@@ -109,6 +113,7 @@ def index():
 
 @app.route("/api/suggest", methods=["POST"])
 def suggest():
+    """Stateless: receives images + summary, returns story + style suggestion."""
     t_start = time.time()
 
     summary = request.form.get("summary", "")
@@ -118,29 +123,9 @@ def suggest():
     if len(files) > 10:
         return jsonify(error="Maximum 10 images allowed."), 400
 
-    session_id = str(uuid.uuid4())
-    image_paths = []
-    compressed_images = []
-
-    t_compress = time.time()
-    for f in files:
-        fname = f"{session_id}_{uuid.uuid4().hex[:8]}_{f.filename}"
-        path = os.path.join(UPLOAD_DIR, fname)
-        f.save(path)
-        image_paths.append(path)
-        compressed_images.append(compress_image(path))
-    print(f"[time] Compression ({len(files)} images): {time.time() - t_compress:.2f}s")
-
-    sessions[session_id] = {
-        "summary": summary,
-        "image_paths": image_paths,
-        "compressed_images": compressed_images,
-        "excluded_styles": [],
-        "story": None,
-    }
+    compressed_images = _compress_uploaded_images(files)
 
     story = generate_story(compressed_images, summary)
-    sessions[session_id]["story"] = story
     print(f"[story] Generated base story: {story.get('title', '(no title)')}")
 
     prompt = build_suggest_prompt(summary, STYLES)
@@ -162,12 +147,10 @@ def suggest():
         suggestion = {"style_name": STYLES[0]["name"], "reasoning": "Default fallback."}
 
     style_info = STYLE_MAP.get(suggestion["style_name"], STYLES[0])
-    sessions[session_id]["excluded_styles"].append(suggestion["style_name"])
 
     print(f"[time] Total suggest: {time.time() - t_start:.2f}s")
 
     return jsonify(
-        session_id=session_id,
         suggestion=suggestion,
         style_description=style_info["description"],
         story=story,
@@ -176,20 +159,23 @@ def suggest():
 
 @app.route("/api/reject", methods=["POST"])
 def reject():
+    """Stateless: receives images + summary + excluded styles, returns new suggestion."""
     t_start = time.time()
-    data = request.get_json()
-    session_id = data.get("session_id")
-    sess = sessions.get(session_id)
-    if not sess:
-        return jsonify(error="Session not found."), 404
 
-    excluded = sess["excluded_styles"]
+    summary = request.form.get("summary", "")
+    excluded = json.loads(request.form.get("excluded", "[]"))
+    files = request.files.getlist("images")
+    if not files or not files[0].filename:
+        return jsonify(error="Please upload at least one image."), 400
+
     remaining = [s for s in STYLES if s["name"] not in excluded]
     if not remaining:
         return jsonify(error="No more styles available.", exhausted=True), 200
 
-    prompt = build_suggest_prompt(sess["summary"], STYLES, excluded=excluded)
-    contents = [prompt] + sess["compressed_images"]
+    compressed_images = _compress_uploaded_images(files)
+
+    prompt = build_suggest_prompt(summary, STYLES, excluded=excluded)
+    contents = [prompt] + compressed_images
 
     t_suggest = time.time()
     response = client.models.generate_content(
@@ -210,12 +196,10 @@ def reject():
         suggestion["style_name"] = remaining[0]["name"]
 
     style_info = STYLE_MAP.get(suggestion["style_name"], remaining[0])
-    sess["excluded_styles"].append(suggestion["style_name"])
 
     print(f"[time] Total reject+suggest: {time.time() - t_start:.2f}s")
 
     return jsonify(
-        session_id=session_id,
         suggestion=suggestion,
         style_description=style_info["description"],
         remaining=len(remaining) - 1,
@@ -224,38 +208,33 @@ def reject():
 
 @app.route("/api/generate", methods=["POST"])
 def generate():
-    # Additional Info: 
-    # v0 - current implementation
-    # v1 - labeled faces trim and upload (using face detection API)
-    # v2- full context engine integration  
-    
+    """Stateless: receives images + summary + style_name, returns base64 image."""
     t_start = time.time()
-    data = request.get_json()
-    session_id = data.get("session_id")
-    style_name = data.get("style_name")
 
-    sess = sessions.get(session_id)
-    if not sess:
-        return jsonify(error="Session not found."), 404
+    summary = request.form.get("summary", "")
+    style_name = request.form.get("style_name", "")
+    files = request.files.getlist("images")
+    if not files or not files[0].filename:
+        return jsonify(error="Please upload at least one image."), 400
 
     style = STYLE_MAP.get(style_name)
     if not style:
         return jsonify(error=f"Unknown style: {style_name}"), 400
 
+    compressed_images = _compress_uploaded_images(files)
+
     story_context = ""
+    styled_story = None
     if style_name in STORY_STYLES_REQUIRING_NARRATIVE:
-        styled_story = generate_story(
-            sess["compressed_images"], sess["summary"], style_hint=style_name
-        )
-        sess["story"] = styled_story
+        styled_story = generate_story(compressed_images, summary, style_hint=style_name)
         story_context = (
             "\n\nStructured story (use this for narrative and text elements):\n"
             + json.dumps(styled_story, indent=2)
         )
         print(f"[story] Regenerated for {style_name}: {styled_story.get('title', '')}")
 
-    prompt = style["prompt"] + " media context: " + sess["summary"] + story_context
-    contents = [prompt] + sess["compressed_images"]
+    prompt = style["prompt"] + " media context: " + summary + story_context
+    contents = [prompt] + compressed_images
 
     t_gen = time.time()
     response = client.models.generate_content(
@@ -267,29 +246,30 @@ def generate():
     )
     print(f"[time] Image generation: {time.time() - t_gen:.2f}s")
 
-    output_path = None
+    image_b64 = None
     response_text = None
     for part in response.parts:
         if part.text is not None:
             response_text = part.text
         elif part.inline_data is not None:
             result_img = part.as_image()
-            out_name = f"{session_id}_output.png"
-            output_path = os.path.join(OUTPUT_DIR, out_name)
-            result_img.save(output_path)
+            buf = io.BytesIO()
+            result_img.save(buf, format="PNG")
+            image_b64 = base64.b64encode(buf.getvalue()).decode("utf-8")
 
-    if not output_path:
+    if not image_b64:
         return jsonify(error="Generation failed — no image returned.", detail=response_text), 500
 
     print(f"[time] Total generate: {time.time() - t_start:.2f}s")
 
     return jsonify(
-        image_url=f"/{output_path}",
+        image_base64=image_b64,
         generation_time=round(time.time() - t_gen, 2),
         total_time=round(time.time() - t_start, 2),
-        story=sess.get("story"),
+        story=styled_story,
     )
 
 
 if __name__ == "__main__":
-    app.run(debug=True, port=5000)
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host="0.0.0.0", port=port, debug=True)
