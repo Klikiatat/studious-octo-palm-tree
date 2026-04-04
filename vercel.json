@@ -1,15 +1,18 @@
 {
   "version": 2,
-  "functions": {
-    "api/index.py": {
-      "runtime": "@vercel/python",
-      "maxDuration": 120
-    }
-  },
-  "rewrites": [
+  "builds": [
     {
-      "source": "/(.*)",
-      "destination": "/api/index.py"
+      "src": "api/index.py",
+      "use": "@vercel/python",
+      "config": {
+        "maxLambdaSize": "50mb"
+      }
+    }
+  ],
+  "routes": [
+    {
+      "src": "/(.*)",
+      "dest": "api/index.py"
     }
   ]
 }
