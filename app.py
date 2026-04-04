@@ -13,6 +13,7 @@ from PIL import Image
 load_dotenv()
 
 app = Flask(__name__)
+app.config["MAX_CONTENT_LENGTH"] = 4.5 * 1024 * 1024  # 4.5 MB (Vercel limit)
 
 def _firebase_web_config_from_env():
     """Build Firebase Web SDK config from individual env vars (returns None if key missing)."""
@@ -62,6 +63,11 @@ from storyAgent import prompt as STORY_PROMPT
 from firestore_logger import fetch_run, list_runs, log_run
 
 STORY_STYLES_REQUIRING_NARRATIVE = {"Junk Journal", "Comic Strip"}
+
+
+@app.errorhandler(413)
+def request_entity_too_large(e):
+    return jsonify(error="Upload too large. Please use fewer or smaller images (limit ~4.5 MB)."), 413
 
 
 # ---------------------------------------------------------------------------
