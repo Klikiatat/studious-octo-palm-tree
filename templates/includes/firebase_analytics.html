@@ -1,0 +1,14 @@
+{# Client-side Firebase (Analytics). Firestore from the browser stays blocked by your rules; server uses Admin SDK. #}
+{% if firebase_web_config %}
+<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-analytics-compat.js"></script>
+<script>
+  (function () {
+    var cfg = {{ firebase_web_config | tojson }};
+    firebase.initializeApp(cfg);
+    if (typeof firebase.analytics === "function") {
+      firebase.analytics();
+    }
+  })();
+</script>
+{% endif %}

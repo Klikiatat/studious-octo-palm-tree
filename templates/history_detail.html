@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>{% if run %}Run {{ run.id[:8] }}…{% else %}Not found{% endif %}</title>
+<style>
+  :root {
+    --bg: #0e0e11;
+    --surface: #1a1a20;
+    --border: #2a2a33;
+    --text: #e4e4e8;
+    --muted: #8888a0;
+    --accent: #6c5ce7;
+    --radius: 12px;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+  }
+  header {
+    width: 100%;
+    padding: 24px 32px;
+    border-bottom: 1px solid var(--border);
+  }
+  header a { color: var(--accent); text-decoration: none; }
+  header a:hover { text-decoration: underline; }
+  header h1 { font-size: 1.25rem; font-weight: 600; }
+  header p { color: var(--muted); font-size: 0.85rem; margin-top: 6px; }
+  main { max-width: 920px; margin: 0 auto; padding: 28px 20px 80px; }
+  .error { color: #e74c5c; padding: 24px; }
+  section { margin-bottom: 28px; }
+  section h2 {
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--muted);
+    margin-bottom: 12px;
+  }
+  dl.meta {
+    display: grid;
+    grid-template-columns: 140px 1fr;
+    gap: 8px 16px;
+    font-size: 0.9rem;
+  }
+  dl.meta dt { color: var(--muted); }
+  pre {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 14px 16px;
+    overflow: auto;
+    font-size: 0.8rem;
+    line-height: 1.45;
+    max-height: 420px;
+  }
+  .thumbs {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+  .thumbs img {
+    width: 160px;
+    height: 160px;
+    object-fit: cover;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+  }
+  .out-img {
+    max-width: 100%;
+    max-height: 70vh;
+    border-radius: var(--radius);
+    border: 1px solid var(--border);
+  }
+  .muted { color: var(--muted); font-size: 0.85rem; }
+</style>
+</head>
+<body>
+<header>
+  <h1>{% if run %}Run detail{% else %}Not found{% endif %}</h1>
+  <p><a href="/history">← All runs</a> &middot; <a href="/">App</a></p>
+</header>
+<main>
+  {% if error %}
+  <p class="error">{{ error }}</p>
+  {% elif run %}
+  <section>
+    <h2>Metadata</h2>
+    <dl class="meta">
+      <dt>Id</dt><dd><code>{{ run.id }}</code></dd>
+      <dt>Time</dt><dd>{{ run.created_at_fmt or "—" }}</dd>
+      <dt>Type</dt><dd>{{ run.type }}</dd>
+      <dt>Style</dt><dd>{{ run.style_name or "—" }}</dd>
+      <dt>Filenames</dt><dd>{{ run.filenames | join(", ") if run.filenames else "—" }}</dd>
+      <dt>Timings</dt><dd>
+        {% if run.generation_time is not none %}gen {{ run.generation_time }}s{% endif %}
+        {% if run.total_time is not none %}{% if run.generation_time is not none %} · {% endif %}total {{ run.total_time }}s{% endif %}
+        {% if run.generation_time is none and run.total_time is none %}—{% endif %}
+      </dd>
+    </dl>
+  </section>
+
+  <section>
+    <h2>Summary (input)</h2>
+    <pre>{{ run.summary or "(empty)" }}</pre>
+  </section>
+
+  {% if input_images %}
+  <section>
+    <h2>Input images (stored)</h2>
+    <div class="thumbs">
+      {% for img in input_images %}
+        {% if img.stored and img.jpeg_base64 %}
+        <img src="data:image/jpeg;base64,{{ img.jpeg_base64 }}" alt="{{ img.filename }}" title="{{ img.filename }}">
+        {% else %}
+        <p class="muted">{{ img.filename or "image" }} — not stored ({{ img.reason or "unknown" }})</p>
+        {% endif %}
+      {% endfor %}
+    </div>
+  </section>
+  {% endif %}
+
+  {% if run.story %}
+  <section>
+    <h2>Story (output)</h2>
+    <pre>{{ run.story | tojson(indent=2) }}</pre>
+  </section>
+  {% endif %}
+
+  {% if run.suggestion %}
+  <section>
+    <h2>Style suggestion (output)</h2>
+    <pre>{{ run.suggestion | tojson(indent=2) }}</pre>
+  </section>
+  {% endif %}
+
+  {% if run.style_description %}
+  <section>
+    <h2>Style description</h2>
+    <pre>{{ run.style_description }}</pre>
+  </section>
+  {% endif %}
+
+  {% if run.excluded %}
+  <section>
+    <h2>Excluded styles</h2>
+    <pre>{{ run.excluded | tojson(indent=2) }}</pre>
+  </section>
+  {% endif %}
+
+  {% if output_image_base64 %}
+  <section>
+    <h2>Generated image (output)</h2>
+    <p><img class="out-img" src="data:image/png;base64,{{ output_image_base64 }}" alt="Generated"></p>
+  </section>
+  {% elif run.has_output_image %}
+  <section>
+    <h2>Generated image (output)</h2>
+    <p class="muted">Not available in Firestore (too large or failed to store).</p>
+  </section>
+  {% endif %}
+
+  {% if run.error %}
+  <section>
+    <h2>Error</h2>
+    <pre>{{ run.error }}</pre>
+  </section>
+  {% endif %}
+
+  {% if run.detail %}
+  <section>
+    <h2>Detail</h2>
+    <pre>{{ run.detail }}</pre>
+  </section>
+  {% endif %}
+  {% endif %}
+</main>
+{% include "includes/firebase_analytics.html" %}
+</body>
+</html>

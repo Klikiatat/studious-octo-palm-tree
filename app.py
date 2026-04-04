@@ -14,6 +14,43 @@ load_dotenv()
 
 app = Flask(__name__)
 
+def _firebase_web_config_from_env():
+    """Build Firebase Web SDK config from individual env vars (returns None if key missing)."""
+    api_key = os.environ.get("FIREBASE_WEB_API_KEY")
+    if not api_key:
+        return None
+    return {
+        "apiKey": api_key,
+        "authDomain": os.environ.get("FIREBASE_WEB_AUTH_DOMAIN", ""),
+        "projectId": os.environ.get("FIREBASE_WEB_PROJECT_ID", ""),
+        "storageBucket": os.environ.get("FIREBASE_WEB_STORAGE_BUCKET", ""),
+        "messagingSenderId": os.environ.get("FIREBASE_WEB_MESSAGING_SENDER_ID", ""),
+        "appId": os.environ.get("FIREBASE_WEB_APP_ID", ""),
+        "measurementId": os.environ.get("FIREBASE_WEB_MEASUREMENT_ID", ""),
+    }
+
+
+def firebase_web_config():
+    if os.environ.get("FIREBASE_WEB_ANALYTICS", "1").strip().lower() in (
+        "0",
+        "false",
+        "no",
+    ):
+        return None
+    raw = os.environ.get("FIREBASE_WEB_CONFIG_JSON")
+    if raw:
+        try:
+            return json.loads(raw)
+        except json.JSONDecodeError:
+            return None
+    return _firebase_web_config_from_env()
+
+
+@app.context_processor
+def _inject_firebase_web_config():
+    return {"firebase_web_config": firebase_web_config()}
+
+
 client = genai.Client(api_key=os.environ["GEMINI_API_KEY"])
 
 STYLES_PATH = os.path.join(os.path.dirname(__file__), "styles.json")
@@ -22,6 +59,7 @@ with open(STYLES_PATH) as f:
 STYLE_MAP = {s["name"]: s for s in STYLES}
 
 from storyAgent import prompt as STORY_PROMPT
+from firestore_logger import fetch_run, list_runs, log_run
 
 STORY_STYLES_REQUIRING_NARRATIVE = {"Junk Journal", "Comic Strip"}
 
@@ -47,6 +85,25 @@ def compress_image_from_file(file_storage, max_size=(1024, 1024), quality=80):
     return compressed_img
 
 
+def _fmt_firestore_time(ts):
+    if ts is None:
+        return ""
+    try:
+        return ts.strftime("%Y-%m-%d %H:%M:%S UTC")
+    except Exception:
+        return str(ts)
+
+
+def _story_title(story):
+    """Support legacy flat story dicts and new { memory_story, memory_summary } shape."""
+    if not isinstance(story, dict):
+        return "(no title)"
+    inner = story.get("memory_story")
+    if isinstance(inner, dict) and inner.get("title"):
+        return inner["title"]
+    return story.get("title") or "(no title)"
+
+
 def _compress_uploaded_images(files):
     """Compress a list of uploaded files and return PIL images + timing."""
     t = time.time()
@@ -61,12 +118,21 @@ def generate_story(images, summary, style_hint=None):
     if style_hint:
         key = {"Junk Journal": "junk_journal", "Comic Strip": "comic_strip"}.get(style_hint)
         if key:
-            style_clause = f"\n\nThe selected style is {key}. Use the corresponding output format."
+            style_clause = (
+                f'\n\nStyle hint: the user selected an illustration style aligned with "{key}". '
+                f"Make that entry in memory_story.style_adaptations especially detailed and actionable."
+            )
 
+    user_turn = json.dumps(
+        {"messages": [{"role": "user", "content": summary}]},
+        ensure_ascii=False,
+    )
     story_prompt = (
         STORY_PROMPT
         + style_clause
-        + f"\n\nUser context: {summary}"
+        + "\n\nUser turn (conversation JSON):\n"
+        + user_turn
+        + "\n\nPhotos are attached in submission order (photo_index 0 = first image, then 1, …)."
         + "\n\nRespond with ONLY valid JSON (no markdown fences)."
     )
 
@@ -111,6 +177,30 @@ def index():
     return render_template("index.html")
 
 
+@app.route("/history")
+def history():
+    runs = list_runs(limit=100)
+    for r in runs:
+        r["created_at_fmt"] = _fmt_firestore_time(r.get("created_at"))
+    return render_template("history.html", runs=runs)
+
+
+@app.route("/history/<run_id>")
+def history_detail(run_id):
+    row = fetch_run(run_id)
+    if not row:
+        return render_template("history_detail.html", error="Run not found.", run=None), 404
+    main, inputs, out_b64 = row
+    main["created_at_fmt"] = _fmt_firestore_time(main.get("created_at"))
+    return render_template(
+        "history_detail.html",
+        error=None,
+        run=main,
+        input_images=inputs,
+        output_image_base64=out_b64,
+    )
+
+
 @app.route("/api/suggest", methods=["POST"])
 def suggest():
     """Stateless: receives images + summary, returns story + style suggestion."""
@@ -126,7 +216,7 @@ def suggest():
     compressed_images = _compress_uploaded_images(files)
 
     story = generate_story(compressed_images, summary)
-    print(f"[story] Generated base story: {story.get('title', '(no title)')}")
+    print(f"[story] Generated base story: {_story_title(story)}")
 
     prompt = build_suggest_prompt(summary, STYLES)
     contents = [prompt] + compressed_images
@@ -150,10 +240,22 @@ def suggest():
 
     print(f"[time] Total suggest: {time.time() - t_start:.2f}s")
 
+    run_id = log_run(
+        "suggest",
+        summary=summary,
+        filenames=[f.filename for f in files],
+        images=compressed_images,
+        story=story,
+        suggestion=suggestion,
+        style_description=style_info["description"],
+        total_time=round(time.time() - t_start, 2),
+    )
+
     return jsonify(
         suggestion=suggestion,
         style_description=style_info["description"],
         story=story,
+        run_id=run_id,
     )
 
 
@@ -199,10 +301,23 @@ def reject():
 
     print(f"[time] Total reject+suggest: {time.time() - t_start:.2f}s")
 
+    run_id = log_run(
+        "reject",
+        summary=summary,
+        filenames=[f.filename for f in files],
+        images=compressed_images,
+        suggestion=suggestion,
+        style_description=style_info["description"],
+        excluded=excluded,
+        remaining=len(remaining) - 1,
+        total_time=round(time.time() - t_start, 2),
+    )
+
     return jsonify(
         suggestion=suggestion,
         style_description=style_info["description"],
         remaining=len(remaining) - 1,
+        run_id=run_id,
     )
 
 
@@ -231,7 +346,7 @@ def generate():
             "\n\nStructured story (use this for narrative and text elements):\n"
             + json.dumps(styled_story, indent=2)
         )
-        print(f"[story] Regenerated for {style_name}: {styled_story.get('title', '')}")
+        print(f"[story] Regenerated for {style_name}: {_story_title(styled_story)}")
 
     prompt = style["prompt"] + " media context: " + summary + story_context
     contents = [prompt] + compressed_images
@@ -262,14 +377,28 @@ def generate():
 
     print(f"[time] Total generate: {time.time() - t_start:.2f}s")
 
+    run_id = log_run(
+        "generate",
+        summary=summary,
+        filenames=[f.filename for f in files],
+        images=compressed_images,
+        story=styled_story,
+        style_name=style_name,
+        style_description=style.get("description"),
+        generation_time=round(time.time() - t_gen, 2),
+        total_time=round(time.time() - t_start, 2),
+        output_image_base64=image_b64,
+    )
+
     return jsonify(
         image_base64=image_b64,
         generation_time=round(time.time() - t_gen, 2),
         total_time=round(time.time() - t_start, 2),
         story=styled_story,
+        run_id=run_id,
     )
 
 
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 5000))
+    port = int(os.environ.get("PORT", 5001))
     app.run(host="0.0.0.0", port=port, debug=True)

@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Run history</title>
+<style>
+  :root {
+    --bg: #0e0e11;
+    --surface: #1a1a20;
+    --border: #2a2a33;
+    --text: #e4e4e8;
+    --muted: #8888a0;
+    --accent: #6c5ce7;
+    --radius: 12px;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+  }
+  header {
+    width: 100%;
+    padding: 24px 32px;
+    text-align: center;
+    border-bottom: 1px solid var(--border);
+  }
+  header h1 { font-size: 1.5rem; font-weight: 600; }
+  header p { color: var(--muted); font-size: 0.875rem; margin-top: 4px; }
+  header a { color: var(--accent); text-decoration: none; }
+  header a:hover { text-decoration: underline; }
+  main { max-width: 880px; margin: 0 auto; padding: 32px 20px 80px; }
+  .empty { color: var(--muted); text-align: center; padding: 48px 16px; }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.9rem;
+  }
+  th, td {
+    text-align: left;
+    padding: 12px 14px;
+    border-bottom: 1px solid var(--border);
+  }
+  th { color: var(--muted); font-weight: 500; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.04em; }
+  tr:hover td { background: rgba(108, 92, 231, 0.04); }
+  td a { color: var(--accent); text-decoration: none; }
+  td a:hover { text-decoration: underline; }
+  .snippet { color: var(--muted); max-width: 360px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .pill {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 6px;
+    font-size: 0.75rem;
+    background: var(--surface);
+    border: 1px solid var(--border);
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>Run history</h1>
+  <p>Inputs and outputs logged from this server &middot; <a href="/">Back to app</a></p>
+</header>
+<main>
+  {% if not runs %}
+  <p class="empty">No runs yet, or Firestore is not configured. Set <code>FIREBASE_SERVICE_ACCOUNT_JSON</code> or <code>GOOGLE_APPLICATION_CREDENTIALS</code> and ensure the service account can access project <code>klikitat-staging</code>.</p>
+  {% else %}
+  <table>
+    <thead>
+      <tr>
+        <th>Time</th>
+        <th>Type</th>
+        <th>Summary</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for r in runs %}
+      <tr>
+        <td>{{ r.created_at_fmt or "—" }}</td>
+        <td><span class="pill">{{ r.type }}</span></td>
+        <td class="snippet" title="{{ r.summary }}">{{ r.summary[:120] }}{% if r.summary|length > 120 %}…{% endif %}</td>
+        <td><a href="/history/{{ r.id }}">View</a></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+</main>
+{% include "includes/firebase_analytics.html" %}
+</body>
+</html>

@@ -165,7 +165,7 @@
 
 <header>
   <h1>AI Image Style Generator</h1>
-  <p>Upload your photos, get a style suggestion, and generate art</p>
+  <p>Upload your photos, get a style suggestion, and generate art · <a href="/history" style="color: var(--accent); text-decoration: none;">Run history</a></p>
 </header>
 
 <main>
@@ -314,8 +314,13 @@
       $("#styleDesc").textContent = data.style_description;
       $("#styleReason").textContent = data.suggestion.reasoning;
 
-      if (data.story && data.story.title) {
-        $("#storyTitle").textContent = data.story.title;
+      const storyTitle =
+        data.story &&
+        (data.story.memory_story && data.story.memory_story.title
+          ? data.story.memory_story.title
+          : data.story.title);
+      if (data.story && storyTitle) {
+        $("#storyTitle").textContent = storyTitle;
         $("#storyBody").textContent = JSON.stringify(data.story, null, 2);
         $("#storyCard").style.display = "";
       } else {
@@ -409,5 +414,6 @@
   function showError(id, msg) { const el = $(`#${id}`); el.textContent = msg; el.style.display = "block"; }
   function hideError(id) { $(`#${id}`).style.display = "none"; }
 </script>
+{% include "includes/firebase_analytics.html" %}
 </body>
 </html>

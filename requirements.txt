@@ -1,4 +1,5 @@
 flask
+firebase-admin
 google-genai
 Pillow
 python-dotenv
