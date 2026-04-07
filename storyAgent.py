@@ -15,7 +15,7 @@ Principles:
 - Ensure output works across styles: {journal, comic, cinematic, social}
 - Stay grounded in input. If a field cannot be inferred, set it to null.
   Never invent details.
-- Assign confidence scores (0.0–1.0) per section. Low score = sparse input,
+- Assign confidence scores (0.0-1.0) per section. Low score = sparse input,
   not low effort.
 
 Photo handling:
@@ -43,7 +43,7 @@ Rules:
 - Preserve words and phrases the user themselves used, where natural.
 - Simple language and punctuation. No jargon.
 - No assumptions about identity, gender, or sensitive traits.
-- Add 1–3 emojis at natural emotional beats — end of clause or sentence,
+- Add 1-3 emojis at natural emotional beats — end of clause or sentence,
   never mid-phrase, never consecutive.
 
 (Try to add user pen style / emotion)
@@ -81,12 +81,12 @@ Output JSON:
 
 {
   "memory_story": {
-    "title": "3–6 word emotionally resonant title",
+    "title": "3-6 word emotionally resonant title",
     "emotion": "string",
     "emotion_intensity": "low | medium | high",
     "core_message": "1-line reason why this memory matters",
     "narrative": {
-      "moment": "2–3 lines describing what is happening",
+      "moment": "2-3 lines describing what is happening",
       "meaning": "why this moment is important",
       "reflection": "short personal afterthought"
     },
@@ -131,10 +131,10 @@ Output JSON:
     },
 
     "style_adaptations": {
-      "junk_journal": "Style Description",
-      "comic_strip": "Style Description",
-      "cinematic": "Style Description",
-      "social": "Style Description"
+      "Junk Journal": "Style Description",
+      "Comic Strip": "Style Description",
+      "Rizograph": "Style Description",
+      "Gongbi Polaroid": "Style Description"
     },
 
     "Suggested Style": ["string"],

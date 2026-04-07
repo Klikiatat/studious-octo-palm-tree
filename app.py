@@ -118,6 +118,133 @@ def _compress_uploaded_images(files):
     return images
 
 
+def _truncate_text(value, max_len=120000):
+    if value is None:
+        return None
+    text = str(value)
+    if len(text) <= max_len:
+        return text
+    return text[:max_len] + f"\n...[truncated {len(text) - max_len} chars]"
+
+
+def build_image_story_context(story, style_name):
+    """Extract image-relevant fields from storyAgent JSON for the image model."""
+    if not isinstance(story, dict):
+        return "(story unavailable)"
+
+    ms = story.get("memory_story")
+    if not isinstance(ms, dict):
+        raw = story.get("raw")
+        if raw:
+            return f"(parse incomplete; use summary grounding)\n{str(raw)[:2500]}"
+        return "(no memory_story in story output)"
+
+    lines = []
+
+    ms_summary = story.get("memory_summary")
+    if ms_summary:
+        lines.append(f"- Memory summary: {ms_summary}")
+
+    if ms.get("title"):
+        lines.append(f"- Title: {ms['title']}")
+
+    em = ms.get("emotion")
+    if em:
+        ei = ms.get("emotion_intensity") or "medium"
+        lines.append(f"- Emotion: {em} (intensity: {ei})")
+
+    if ms.get("core_message"):
+        lines.append(f"- Core message: {ms['core_message']}")
+
+    nav = ms.get("narrative") or {}
+    if nav.get("moment"):
+        lines.append(f"- Moment / scene: {nav['moment']}")
+    if nav.get("meaning"):
+        lines.append(f"- Meaning: {nav['meaning']}")
+    if nav.get("reflection"):
+        lines.append(f"- Reflection: {nav['reflection']}")
+
+    ve = ms.get("visual_elements") or {}
+    ko = ve.get("key_objects") or []
+    if ko:
+        ko = [str(x) for x in ko if x]
+        if ko:
+            lines.append(f"- Key objects: {', '.join(ko)}")
+    ec = ve.get("environment_cues") or []
+    if ec:
+        ec = [str(x) for x in ec if x]
+        if ec:
+            lines.append(f"- Environment: {', '.join(ec)}")
+    if ve.get("color_mood"):
+        lines.append(f"- Color mood: {ve['color_mood']}")
+
+    te = ms.get("text_elements") or {}
+    if te.get("primary_caption"):
+        lines.append(f"- Primary caption (on-image text): {te['primary_caption']}")
+    if te.get("title_text"):
+        lines.append(f"- Title text: {te['title_text']}")
+    if te.get("secondary_caption"):
+        lines.append(f"- Secondary caption: {te['secondary_caption']}")
+    if te.get("handwritten_note"):
+        lines.append(f"- Handwritten note: {te['handwritten_note']}")
+
+    chars = ms.get("characters") or []
+    if chars:
+        char_bits = []
+        for c in chars:
+            if not isinstance(c, dict):
+                continue
+            lab = (c.get("label") or "").strip()
+            desc = (c.get("description") or "").strip()
+            prim = " (primary)" if c.get("is_primary") else ""
+            head = f"{lab}{prim}".strip()
+            if head and desc:
+                char_bits.append(f"{head}: {desc}")
+            elif desc:
+                char_bits.append(desc)
+            elif head:
+                char_bits.append(head)
+        if char_bits:
+            lines.append("- Characters:\n  " + "\n  ".join(char_bits))
+
+    pm = ms.get("photo_mapping") or []
+    if pm:
+        pm_bits = []
+        for p in pm:
+            if not isinstance(p, dict):
+                continue
+            idx = p.get("photo_index")
+            role = p.get("role")
+            vf = p.get("visual_focus") or ""
+            ch = p.get("composition_hint") or ""
+            parts = [f"photo {idx}", f"role={role}"]
+            if vf:
+                parts.append(f"focus={vf}")
+            if ch:
+                parts.append(f"composition={ch}")
+            pm_bits.append(", ".join(parts))
+        if pm_bits:
+            lines.append("- Photo mapping:\n  " + "\n  ".join(pm_bits))
+
+    ef = ms.get("experience_flow") or {}
+    if ef.get("highlight_moment"):
+        lines.append(f"- Highlight moment: {ef['highlight_moment']}")
+    if ef.get("pacing"):
+        lines.append(f"- Pacing: {ef['pacing']}")
+
+    sa = ms.get("style_adaptations") or {}
+    if style_name and sa.get(style_name):
+        lines.append(f"- Style-specific direction for «{style_name}»: {sa[style_name]}")
+
+    if not lines:
+        raw = story.get("raw")
+        if raw:
+            return str(raw)[:2500]
+        return "(empty story fields)"
+
+    return "\n".join(lines)
+
+
 def generate_story(images, summary, style_hint=None):
     """Call Gemini to produce a structured story from photos + summary."""
     style_clause = ""
@@ -177,6 +304,25 @@ def build_suggest_prompt(summary, style_descriptions, excluded=None):
 # ---------------------------------------------------------------------------
 # Routes
 # ---------------------------------------------------------------------------
+
+@app.route("/api/debug-firestore")
+def debug_firestore():
+    """Diagnostic: shows Firestore init state (no secrets exposed)."""
+    sa_json = os.environ.get("FIREBASE_SERVICE_ACCOUNT_JSON")
+    gac = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
+    from firestore_logger import PROJECT_ID, DATABASE_ID, _client, _firestore_init_failed
+    client = _client()
+    return jsonify(
+        FIREBASE_SERVICE_ACCOUNT_JSON_set=bool(sa_json),
+        FIREBASE_SERVICE_ACCOUNT_JSON_length=len(sa_json) if sa_json else 0,
+        GOOGLE_APPLICATION_CREDENTIALS=gac or "(not set)",
+        GAC_file_exists=bool(gac and os.path.isfile(gac)),
+        FIREBASE_PROJECT_ID=PROJECT_ID,
+        FIREBASE_DATABASE_ID=DATABASE_ID,
+        firestore_client_ok=client is not None,
+        init_failed_flag=_firestore_init_failed,
+    )
+
 
 @app.route("/")
 def index():
@@ -344,17 +490,23 @@ def generate():
 
     compressed_images = _compress_uploaded_images(files)
 
-    story_context = ""
-    styled_story = None
-    if style_name in STORY_STYLES_REQUIRING_NARRATIVE:
-        styled_story = generate_story(compressed_images, summary, style_hint=style_name)
-        story_context = (
-            "\n\nStructured story (use this for narrative and text elements):\n"
-            + json.dumps(styled_story, indent=2)
-        )
-        print(f"[story] Regenerated for {style_name}: {_story_title(styled_story)}")
+    style_hint = style_name if style_name in STORY_STYLES_REQUIRING_NARRATIVE else None
+    styled_story = generate_story(compressed_images, summary, style_hint=style_hint)
+    story_context = build_image_story_context(styled_story, style_name)
+    print(f"[story] For image generation ({style_name}): {_story_title(styled_story)}")
 
-    prompt = style["prompt"] + " media context: " + summary + story_context
+    prompt = (
+        style["prompt"]
+        + "\n\n## Story agent output (priority for mood, text, and composition)\n"
+        "Apply these fields when present: emotion and emotion_intensity for palette and energy; "
+        "color_mood, key_objects, and environment for visuals; primary_caption, title_text, "
+        "secondary_caption, and handwritten_note for any typography; characters and photo_mapping "
+        "for who and what to emphasize; highlight_moment and pacing for narrative emphasis; "
+        f"the style-specific line for «{style_name}» for how this style should treat the scene.\n\n"
+        + story_context
+        + "\n\n## Original user summary (grounding)\n"
+        + summary
+    )
     contents = [prompt] + compressed_images
 
     t_gen = time.time()
@@ -373,10 +525,16 @@ def generate():
         if part.text is not None:
             response_text = part.text
         elif part.inline_data is not None:
-            result_img = part.as_image()
-            buf = io.BytesIO()
-            result_img.save(buf, format="PNG")
-            image_b64 = base64.b64encode(buf.getvalue()).decode("utf-8")
+            # google.genai.types.Image.save() only accepts a file path, not PIL kwargs;
+            # use raw bytes from the image wrapper or blob.
+            gen_image = part.as_image()
+            raw = getattr(gen_image, "image_bytes", None) if gen_image is not None else None
+            if not raw and part.inline_data.mime_type and part.inline_data.mime_type.startswith(
+                "image/"
+            ):
+                raw = part.inline_data.data
+            if raw:
+                image_b64 = base64.b64encode(raw).decode("utf-8")
 
     if not image_b64:
         return jsonify(error="Generation failed — no image returned.", detail=response_text), 500
@@ -391,6 +549,8 @@ def generate():
         story=styled_story,
         style_name=style_name,
         style_description=style.get("description"),
+        image_prompt=_truncate_text(prompt),
+        model_output_text=_truncate_text(response_text),
         generation_time=round(time.time() - t_gen, 2),
         total_time=round(time.time() - t_start, 2),
         output_image_base64=image_b64,

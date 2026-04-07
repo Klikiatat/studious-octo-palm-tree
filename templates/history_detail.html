@@ -144,6 +144,20 @@
   </section>
   {% endif %}
 
+  {% if run.image_prompt %}
+  <section>
+    <h2>Image prompt (input to model)</h2>
+    <pre>{{ run.image_prompt }}</pre>
+  </section>
+  {% endif %}
+
+  {% if run.model_output_text %}
+  <section>
+    <h2>Model text output</h2>
+    <pre>{{ run.model_output_text }}</pre>
+  </section>
+  {% endif %}
+
   {% if run.excluded %}
   <section>
     <h2>Excluded styles</h2>

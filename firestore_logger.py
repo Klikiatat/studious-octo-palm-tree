@@ -25,9 +25,25 @@ _firestore_client: Optional[firestore.Client] = None
 _firestore_init_failed = False
 
 
+_DEBUG_LOG = os.path.join(os.path.dirname(__file__), ".cursor", "debug-6bcec8.log")
+
+def _dlog(msg, data=None, hyp=""):
+    # #region agent log
+    import time as _t
+    try:
+        os.makedirs(os.path.dirname(_DEBUG_LOG), exist_ok=True)
+        entry = json.dumps({"sessionId":"6bcec8","timestamp":int(_t.time()*1000),"location":"firestore_logger.py","message":msg,"data":data or {},"hypothesisId":hyp})
+        with open(_DEBUG_LOG, "a") as f:
+            f.write(entry + "\n")
+    except Exception:
+        pass
+    # #endregion
+
+
 def _client() -> Optional[firestore.Client]:
     global _firestore_client, _firestore_init_failed
     if _firestore_init_failed:
+        _dlog("_client: returning None (init previously failed)", hyp="H4")
         return None
     if _firestore_client is not None:
         return _firestore_client
@@ -35,22 +51,42 @@ def _client() -> Optional[firestore.Client]:
         _firestore_client = firestore.client(database_id=DATABASE_ID)
         return _firestore_client
 
+    sa_json_raw = os.environ.get("FIREBASE_SERVICE_ACCOUNT_JSON")
+    gac_path = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
+    _dlog("_client: env check", {
+        "FIREBASE_SERVICE_ACCOUNT_JSON_set": bool(sa_json_raw),
+        "FIREBASE_SERVICE_ACCOUNT_JSON_len": len(sa_json_raw) if sa_json_raw else 0,
+        "FIREBASE_SERVICE_ACCOUNT_JSON_first50": (sa_json_raw or "")[:50],
+        "GOOGLE_APPLICATION_CREDENTIALS": gac_path or "(not set)",
+        "GAC_file_exists": bool(gac_path and os.path.isfile(gac_path)),
+        "PROJECT_ID": PROJECT_ID,
+        "DATABASE_ID": DATABASE_ID,
+    }, hyp="H1,H3,H5")
+
     try:
-        sa_json = os.environ.get("FIREBASE_SERVICE_ACCOUNT_JSON")
-        if sa_json:
-            cred = credentials.Certificate(json.loads(sa_json))
+        if sa_json_raw:
+            try:
+                parsed = json.loads(sa_json_raw)
+                _dlog("_client: SA JSON parsed ok", {"keys": list(parsed.keys()), "project_id_in_json": parsed.get("project_id","(missing)")}, hyp="H2")
+            except json.JSONDecodeError as je:
+                _dlog("_client: SA JSON parse FAILED", {"error": str(je), "first100": sa_json_raw[:100]}, hyp="H2")
+                raise
+            cred = credentials.Certificate(parsed)
         else:
-            path = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
-            if path and os.path.isfile(path):
-                cred = credentials.Certificate(path)
+            if gac_path and os.path.isfile(gac_path):
+                _dlog("_client: using file creds", {"path": gac_path}, hyp="H3")
+                cred = credentials.Certificate(gac_path)
             else:
+                _dlog("_client: falling back to ApplicationDefault", hyp="H4")
                 cred = credentials.ApplicationDefault()
         firebase_admin.initialize_app(cred, {"projectId": PROJECT_ID})
         _firestore_client = firestore.client(database_id=DATABASE_ID)
+        _dlog("_client: SUCCESS", {"project": PROJECT_ID, "db": DATABASE_ID}, hyp="ALL")
         print(f"[firestore] Initialized for project {PROJECT_ID}, database {DATABASE_ID}")
         return _firestore_client
     except Exception as e:
         _firestore_init_failed = True
+        _dlog("_client: INIT FAILED", {"error": str(e), "error_type": type(e).__name__}, hyp="H2,H4")
         print(f"[firestore] Disabled (init failed): {e}")
         return None
 
@@ -134,6 +170,8 @@ def log_run(
         "suggestion",
         "style_description",
         "style_name",
+        "image_prompt",
+        "model_output_text",
         "excluded",
         "generation_time",
         "total_time",
