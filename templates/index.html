@@ -95,6 +95,19 @@
   }
   textarea:focus { outline: none; border-color: var(--accent); }
 
+  select.style-select {
+    width: 100%;
+    padding: 12px 14px;
+    border-radius: var(--radius);
+    border: 1px solid var(--border);
+    background: var(--surface);
+    color: var(--text);
+    font-size: 0.95rem;
+    font-family: inherit;
+    cursor: pointer;
+  }
+  select.style-select:focus { outline: none; border-color: var(--accent); }
+
   .btn {
     display: inline-flex; align-items: center; justify-content: center;
     padding: 12px 28px; border: none; border-radius: var(--radius);
@@ -203,6 +216,14 @@
         <p class="desc" id="styleDesc"></p>
         <div class="reasoning" id="styleReason"></div>
       </div>
+      <label class="field" for="styleSelect">Style for generation</label>
+      <p class="desc" style="margin-top:0;margin-bottom:8px;font-size:0.85rem;">The suggested style is pre-selected. You can pick any style before generating.</p>
+      <select id="styleSelect" class="style-select" aria-label="Illustration style">
+        {% for s in styles %}
+        <option value="{{ s.name }}">{{ s.name }}</option>
+        {% endfor %}
+      </select>
+      <p class="desc" id="styleSelectDesc" style="margin-top:10px;"></p>
       <div class="actions">
         <button class="btn btn-primary" id="btnConfirm">Confirm & Generate</button>
         <button class="btn btn-danger" id="btnReject">Reject</button>
@@ -231,6 +252,7 @@
 </main>
 
 <script>
+  const STYLES_CATALOG = {{ styles | tojson }};
   const $ = (sel) => document.querySelector(sel);
   const dropZone = $("#dropZone");
   const fileInput = $("#fileInput");
@@ -244,6 +266,28 @@
   let selectedFiles = [];
   let currentStyle = null;
   let excludedStyles = [];
+
+  const styleSelect = $("#styleSelect");
+  const styleSelectDesc = $("#styleSelectDesc");
+
+  function updateStyleSelectDesc() {
+    const name = styleSelect.value;
+    const row = STYLES_CATALOG.find((s) => s.name === name);
+    styleSelectDesc.textContent = row ? row.description : "";
+  }
+
+  function setStyleSelectValue(name) {
+    if (!name) return;
+    for (let i = 0; i < styleSelect.options.length; i++) {
+      if (styleSelect.options[i].value === name) {
+        styleSelect.selectedIndex = i;
+        updateStyleSelectDesc();
+        return;
+      }
+    }
+  }
+
+  styleSelect.addEventListener("change", updateStyleSelectDesc);
 
   function compressImage(file) {
     return new Promise((resolve, reject) => {
@@ -360,6 +404,7 @@
       $("#styleName").textContent = data.suggestion.style_name;
       $("#styleDesc").textContent = data.style_description;
       $("#styleReason").textContent = data.suggestion.reasoning;
+      setStyleSelectValue(data.suggestion.style_name);
 
       const storyTitle =
         data.story &&
@@ -404,6 +449,7 @@
       $("#styleName").textContent = data.suggestion.style_name;
       $("#styleDesc").textContent = data.style_description;
       $("#styleReason").textContent = data.suggestion.reasoning;
+      setStyleSelectValue(data.suggestion.style_name);
 
       $("#suggestLoading").style.display = "none";
       $("#suggestResult").style.display = "";
@@ -422,7 +468,7 @@
     hideError("genError");
 
     try {
-      const fd = await buildCompressedFormData({ style_name: currentStyle });
+      const fd = await buildCompressedFormData({ style_name: styleSelect.value });
       const data = await safeFetch("/api/generate", { method: "POST", body: fd });
       if (data.error) throw new Error(data.error);
 

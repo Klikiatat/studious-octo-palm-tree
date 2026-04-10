@@ -100,6 +100,13 @@
         {% if run.total_time is not none %}{% if run.generation_time is not none %} · {% endif %}total {{ run.total_time }}s{% endif %}
         {% if run.generation_time is none and run.total_time is none %}—{% endif %}
       </dd>
+      <dt>Story timings</dt><dd>
+        {% if run.story_call_a_time is not none %}A {{ run.story_call_a_time }}s{% endif %}
+        {% if run.story_call_b_time is not none %}{% if run.story_call_a_time is not none %} · {% endif %}B {{ run.story_call_b_time }}s{% endif %}
+        {% if run.story_fuse_time is not none %}{% if run.story_call_a_time is not none or run.story_call_b_time is not none %} · {% endif %}fuse {{ run.story_fuse_time }}s{% endif %}
+        {% if run.story_total_time is not none %}{% if run.story_call_a_time is not none or run.story_call_b_time is not none or run.story_fuse_time is not none %} · {% endif %}total {{ run.story_total_time }}s{% endif %}
+        {% if run.story_call_a_time is none and run.story_call_b_time is none and run.story_fuse_time is none and run.story_total_time is none %}—{% endif %}
+      </dd>
     </dl>
   </section>
 
@@ -188,6 +195,13 @@
   <section>
     <h2>Detail</h2>
     <pre>{{ run.detail }}</pre>
+  </section>
+  {% endif %}
+
+  {% if run.story_parallel_fallback %}
+  <section>
+    <h2>Story parallel fallback</h2>
+    <pre>{{ run.story_parallel_fallback }}</pre>
   </section>
   {% endif %}
   {% endif %}

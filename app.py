@@ -1,7 +1,9 @@
 import base64
+import concurrent.futures
 import io
 import json
 import os
+import re
 import time
 
 from dotenv import load_dotenv
@@ -59,7 +61,7 @@ with open(STYLES_PATH) as f:
     STYLES = json.load(f)
 STYLE_MAP = {s["name"]: s for s in STYLES}
 
-from storyAgent import prompt as STORY_PROMPT
+from storyAgent import MEMORY_STORY_PROMPT, MEMORY_SUMMARY_PROMPT
 from firestore_logger import fetch_run, list_runs, log_run
 
 STORY_STYLES_REQUIRING_NARRATIVE = {"Junk Journal", "Comic Strip"}
@@ -245,8 +247,88 @@ def build_image_story_context(story, style_name):
     return "\n".join(lines)
 
 
+def _extract_json_payload(response):
+    raw = (getattr(response, "text", "") or "").strip()
+    if raw.startswith("```"):
+        raw = raw.split("\n", 1)[1].rsplit("```", 1)[0].strip()
+    return raw
+
+
+def _summarize_to_caption(memory_summary):
+    if not memory_summary:
+        return None
+    no_emoji = re.sub(r"[^\x00-\x7F]+", "", str(memory_summary))
+    cleaned = re.sub(r"\s+", " ", no_emoji).strip()
+    # Lightweight present-tense nudges.
+    replacements = {
+        " was ": " is ",
+        " were ": " are ",
+        " had ": " have ",
+        " did ": " do ",
+        " went ": " go ",
+    }
+    caption = f" {cleaned} "
+    for src, dst in replacements.items():
+        caption = caption.replace(src, dst)
+    words = caption.strip().split()
+    return " ".join(words[:12]).strip(" ,.;:!?-") or None
+
+
+def _ensure_story_shape(story, memory_summary):
+    ms = story.get("memory_story") if isinstance(story, dict) else None
+    if not isinstance(ms, dict):
+        ms = {}
+
+    story_obj = {
+        "title": ms.get("title"),
+        "emotion": ms.get("emotion"),
+        "emotion_intensity": ms.get("emotion_intensity"),
+        "core_message": ms.get("core_message"),
+        "narrative": ms.get("narrative") if isinstance(ms.get("narrative"), dict) else {},
+        "characters": ms.get("characters") if isinstance(ms.get("characters"), list) else [],
+        "photo_mapping": ms.get("photo_mapping") if isinstance(ms.get("photo_mapping"), list) else [],
+        "visual_elements": ms.get("visual_elements") if isinstance(ms.get("visual_elements"), dict) else {},
+        "experience_flow": ms.get("experience_flow") if isinstance(ms.get("experience_flow"), dict) else {},
+        "text_elements": ms.get("text_elements") if isinstance(ms.get("text_elements"), dict) else {},
+        "style_adaptations": ms.get("style_adaptations") if isinstance(ms.get("style_adaptations"), dict) else {},
+        "Suggested Style": ms.get("Suggested Style") if isinstance(ms.get("Suggested Style"), list) else [],
+        "confidence": ms.get("confidence") if isinstance(ms.get("confidence"), dict) else {},
+    }
+
+    text_elements = story_obj["text_elements"]
+    text_elements.setdefault("title_text", None)
+    text_elements.setdefault("secondary_caption", None)
+    text_elements.setdefault("handwritten_note", None)
+    text_elements["primary_caption"] = _summarize_to_caption(memory_summary) or text_elements.get(
+        "primary_caption"
+    )
+
+    narrative = story_obj["narrative"]
+    narrative.setdefault("moment", None)
+    narrative.setdefault("meaning", None)
+    narrative.setdefault("reflection", None)
+
+    visual = story_obj["visual_elements"]
+    visual.setdefault("key_objects", [])
+    visual.setdefault("environment_cues", [])
+    visual.setdefault("color_mood", None)
+
+    flow = story_obj["experience_flow"]
+    flow.setdefault("pacing", None)
+    flow.setdefault("emotional_progression", [])
+    flow.setdefault("highlight_moment", None)
+
+    conf = story_obj["confidence"]
+    conf.setdefault("overall", None)
+    conf.setdefault("narrative", None)
+    conf.setdefault("visual", None)
+    conf.setdefault("note", None)
+
+    return {"memory_story": story_obj, "memory_summary": memory_summary}
+
+
 def generate_story(images, summary, style_hint=None):
-    """Call Gemini to produce a structured story from photos + summary."""
+    """Run story and summary calls in parallel, then fuse deterministically."""
     style_clause = ""
     if style_hint:
         key = {"Junk Journal": "junk_journal", "Comic Strip": "comic_strip"}.get(style_hint)
@@ -260,29 +342,90 @@ def generate_story(images, summary, style_hint=None):
         {"messages": [{"role": "user", "content": summary}]},
         ensure_ascii=False,
     )
-    story_prompt = (
-        STORY_PROMPT
+    memory_story_prompt = (
+        MEMORY_STORY_PROMPT
         + style_clause
         + "\n\nUser turn (conversation JSON):\n"
         + user_turn
         + "\n\nPhotos are attached in submission order (photo_index 0 = first image, then 1, …)."
         + "\n\nRespond with ONLY valid JSON (no markdown fences)."
     )
-
-    t = time.time()
-    response = client.models.generate_content(
-        model="gemini-2.5-flash",
-        contents=[story_prompt] + images,
+    memory_summary_prompt = (
+        MEMORY_SUMMARY_PROMPT
+        + "\n\nUser turn (conversation JSON):\n"
+        + user_turn
+        + "\n\nRespond with ONLY valid JSON (no markdown fences)."
     )
-    print(f"[time] Story generation: {time.time() - t:.2f}s")
 
-    raw = response.text.strip()
-    if raw.startswith("```"):
-        raw = raw.split("\n", 1)[1].rsplit("```", 1)[0].strip()
+    timings = {}
+    fallback_reason = None
+    t_total = time.time()
+
+    def _call_story():
+        t = time.time()
+        response = client.models.generate_content(
+            model="gemini-2.5-flash",
+            contents=[memory_story_prompt] + images,
+        )
+        timings["story_call_a_time"] = round(time.time() - t, 2)
+        return response
+
+    def _call_summary():
+        t = time.time()
+        response = client.models.generate_content(
+            model="gemini-2.5-flash",
+            contents=[memory_summary_prompt],
+        )
+        timings["story_call_b_time"] = round(time.time() - t, 2)
+        return response
+
+    t_fuse = time.time()
+    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
+        future_story = executor.submit(_call_story)
+        future_summary = executor.submit(_call_summary)
+
+        story_raw = "{}"
+        summary_raw = '{"memory_summary": null}'
+        try:
+            story_raw = _extract_json_payload(future_story.result())
+        except Exception as e:
+            fallback_reason = f"story_call_failed: {e}"
+        try:
+            summary_raw = _extract_json_payload(future_summary.result())
+        except Exception as e:
+            fallback_reason = f"{fallback_reason}; summary_call_failed: {e}" if fallback_reason else f"summary_call_failed: {e}"
+
     try:
-        return json.loads(raw)
+        story_payload = json.loads(story_raw)
     except json.JSONDecodeError:
-        return {"title": "", "raw": raw}
+        story_payload = {"memory_story": {}, "raw": story_raw}
+        fallback_reason = (fallback_reason + "; " if fallback_reason else "") + "story_json_parse_failed"
+
+    try:
+        summary_payload = json.loads(summary_raw)
+    except json.JSONDecodeError:
+        summary_payload = {"memory_summary": None}
+        fallback_reason = (fallback_reason + "; " if fallback_reason else "") + "summary_json_parse_failed"
+
+    memory_summary = None
+    if isinstance(summary_payload, dict):
+        memory_summary = summary_payload.get("memory_summary")
+    if memory_summary is not None:
+        memory_summary = str(memory_summary).strip() or None
+
+    fused = _ensure_story_shape(story_payload, memory_summary)
+    timings["story_fuse_time"] = round(time.time() - t_fuse, 2)
+    timings["story_total_time"] = round(time.time() - t_total, 2)
+    if fallback_reason:
+        timings["story_parallel_fallback"] = fallback_reason
+    print(
+        "[time] Story generation (parallel): "
+        f"A={timings.get('story_call_a_time', 0):.2f}s "
+        f"B={timings.get('story_call_b_time', 0):.2f}s "
+        f"fuse={timings.get('story_fuse_time', 0):.2f}s "
+        f"total={timings.get('story_total_time', 0):.2f}s"
+    )
+    return fused, timings
 
 
 def build_suggest_prompt(summary, style_descriptions, excluded=None):
@@ -326,7 +469,7 @@ def debug_firestore():
 
 @app.route("/")
 def index():
-    return render_template("index.html")
+    return render_template("index.html", styles=STYLES)
 
 
 @app.route("/history")
@@ -367,7 +510,7 @@ def suggest():
 
     compressed_images = _compress_uploaded_images(files)
 
-    story = generate_story(compressed_images, summary)
+    story, story_metrics = generate_story(compressed_images, summary)
     print(f"[story] Generated base story: {_story_title(story)}")
 
     prompt = build_suggest_prompt(summary, STYLES)
@@ -400,6 +543,11 @@ def suggest():
         story=story,
         suggestion=suggestion,
         style_description=style_info["description"],
+        story_call_a_time=story_metrics.get("story_call_a_time"),
+        story_call_b_time=story_metrics.get("story_call_b_time"),
+        story_fuse_time=story_metrics.get("story_fuse_time"),
+        story_total_time=story_metrics.get("story_total_time"),
+        story_parallel_fallback=story_metrics.get("story_parallel_fallback"),
         total_time=round(time.time() - t_start, 2),
     )
 
@@ -491,7 +639,7 @@ def generate():
     compressed_images = _compress_uploaded_images(files)
 
     style_hint = style_name if style_name in STORY_STYLES_REQUIRING_NARRATIVE else None
-    styled_story = generate_story(compressed_images, summary, style_hint=style_hint)
+    styled_story, story_metrics = generate_story(compressed_images, summary, style_hint=style_hint)
     story_context = build_image_story_context(styled_story, style_name)
     print(f"[story] For image generation ({style_name}): {_story_title(styled_story)}")
 
@@ -549,6 +697,11 @@ def generate():
         story=styled_story,
         style_name=style_name,
         style_description=style.get("description"),
+        story_call_a_time=story_metrics.get("story_call_a_time"),
+        story_call_b_time=story_metrics.get("story_call_b_time"),
+        story_fuse_time=story_metrics.get("story_fuse_time"),
+        story_total_time=story_metrics.get("story_total_time"),
+        story_parallel_fallback=story_metrics.get("story_parallel_fallback"),
         image_prompt=_truncate_text(prompt),
         model_output_text=_truncate_text(response_text),
         generation_time=round(time.time() - t_gen, 2),
