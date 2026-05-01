@@ -1,10 +1,12 @@
 import base64
 import concurrent.futures
+import datetime
 import io
 import json
 import os
 import re
 import time
+import uuid
 
 from dotenv import load_dotenv
 from flask import Flask, jsonify, request, render_template
@@ -61,10 +63,14 @@ with open(STYLES_PATH) as f:
     STYLES = json.load(f)
 STYLE_MAP = {s["name"]: s for s in STYLES}
 
-from storyAgent import MEMORY_STORY_PROMPT, MEMORY_SUMMARY_PROMPT
+from storyAgent import MEMORY_STORY_PROMPT, MEMORY_SUMMARY_PROMPT, IMAGE_VALIDATION_PROMPT
 from firestore_logger import fetch_run, list_runs, log_run
 
 STORY_STYLES_REQUIRING_NARRATIVE = {"Junk Journal", "Comic Strip"}
+LOCAL_OUTPUT_DIR = os.environ.get(
+    "LOCAL_OUTPUT_DIR",
+    os.path.join(os.path.dirname(__file__), "local_outputs"),
+)
 
 
 @app.errorhandler(413)
@@ -127,6 +133,48 @@ def _truncate_text(value, max_len=120000):
     if len(text) <= max_len:
         return text
     return text[:max_len] + f"\n...[truncated {len(text) - max_len} chars]"
+
+
+def _safe_slug(value, default="run", max_len=40):
+    text = re.sub(r"[^a-zA-Z0-9_-]+", "-", (value or "").strip())
+    text = re.sub(r"-{2,}", "-", text).strip("-_")
+    if not text:
+        text = default
+    return text[:max_len]
+
+
+def _save_local_run_artifacts(
+    image_bytes,
+    summary,
+    style_name,
+    prompt,
+    story,
+    validation,
+):
+    """Persist generated outputs and evals to local directory."""
+    os.makedirs(LOCAL_OUTPUT_DIR, exist_ok=True)
+    run_stamp = datetime.datetime.utcnow().strftime("%Y%m%dT%H%M%SZ")
+    run_id = f"{run_stamp}-{_safe_slug(style_name or 'style')}-{uuid.uuid4().hex[:8]}"
+    run_dir = os.path.join(LOCAL_OUTPUT_DIR, run_id)
+    os.makedirs(run_dir, exist_ok=True)
+
+    image_path = os.path.join(run_dir, "generated_image.png")
+    with open(image_path, "wb") as f:
+        f.write(image_bytes)
+
+    payload = {
+        "saved_at_utc": run_stamp,
+        "style_name": style_name,
+        "summary": summary,
+        "story": story,
+        "validation": validation,
+        "image_prompt": _truncate_text(prompt),
+    }
+    json_path = os.path.join(run_dir, "result.json")
+    with open(json_path, "w", encoding="utf-8") as f:
+        json.dump(payload, f, ensure_ascii=False, indent=2)
+
+    return run_dir, image_path, json_path
 
 
 def build_image_story_context(story, style_name):
@@ -327,6 +375,68 @@ def _ensure_story_shape(story, memory_summary):
     return {"memory_story": story_obj, "memory_summary": memory_summary}
 
 
+def validate_generated_image(
+    reference_images,
+    generated_image,
+    summary,
+    style_name,
+    story=None,
+):
+    """Independent eval agent: validate image without requiring story call success."""
+    story_context = (
+        build_image_story_context(story, style_name)
+        if isinstance(story, dict) and story
+        else "(story unavailable; evaluate against user summary, style, and reference photos only)"
+    )
+    prompt = (
+        IMAGE_VALIDATION_PROMPT
+        + "\n\n## Story context\n"
+        + story_context
+        + "\n\n## Original user summary\n"
+        + (summary or "")
+        + "\n\n## Selected style\n"
+        + (style_name or "")
+        + "\n\nRespond with ONLY valid JSON (no markdown fences)."
+    )
+
+    contents = [prompt] + reference_images + [generated_image]
+    response = client.models.generate_content(
+        model="gemini-2.5-flash",
+        contents=contents,
+    )
+
+    try:
+        raw = _extract_json_payload(response)
+        payload = json.loads(raw)
+        validation = payload.get("validation") if isinstance(payload, dict) else None
+        if not isinstance(validation, dict):
+            raise ValueError("Missing validation object")
+        return payload
+    except Exception as e:
+        return {
+            "validation": {
+                "overall_score": 0.0,
+                "story_alignment_score": 0.0,
+                "visual_quality_score": 0.0,
+                "style_adherence_score": 0.0,
+                "groundedness_score": 0.0,
+                "pass": False,
+                "confidence": 0.0,
+                "summary": "Validation parse failed.",
+                "strengths": [],
+                "issues": [
+                    {
+                        "type": "visual_quality",
+                        "severity": "high",
+                        "description": f"Validator output could not be parsed: {e}",
+                        "fix_suggestion": "Retry validation with the same inputs.",
+                    }
+                ],
+                "recommended_prompt_adjustments": [],
+            }
+        }
+
+
 def generate_story(images, summary, style_hint=None):
     """Run story and summary calls in parallel, then fuse deterministically."""
     style_clause = ""
@@ -363,12 +473,23 @@ def generate_story(images, summary, style_hint=None):
 
     def _call_story():
         t = time.time()
-        response = client.models.generate_content(
-            model="gemini-2.5-flash",
-            contents=[memory_story_prompt] + images,
-        )
-        timings["story_call_a_time"] = round(time.time() - t, 2)
-        return response
+        last_err = None
+        # Retry transient network failures (e.g. [Errno 60] timeout).
+        for attempt in range(3):
+            try:
+                response = client.models.generate_content(
+                    model="gemini-2.5-flash",
+                    contents=[memory_story_prompt] + images,
+                )
+                timings["story_call_a_time"] = round(time.time() - t, 2)
+                if attempt > 0:
+                    timings["story_call_a_retries"] = attempt
+                return response
+            except Exception as e:
+                last_err = e
+                if attempt < 2:
+                    time.sleep(1.0 * (attempt + 1))
+        raise last_err
 
     def _call_summary():
         t = time.time()
@@ -668,6 +789,7 @@ def generate():
     print(f"[time] Image generation: {time.time() - t_gen:.2f}s")
 
     image_b64 = None
+    generated_bytes = None
     response_text = None
     for part in response.parts:
         if part.text is not None:
@@ -682,10 +804,46 @@ def generate():
             ):
                 raw = part.inline_data.data
             if raw:
+                generated_bytes = raw
                 image_b64 = base64.b64encode(raw).decode("utf-8")
 
     if not image_b64:
         return jsonify(error="Generation failed — no image returned.", detail=response_text), 500
+
+    generated_image = None
+    try:
+        generated_image = Image.open(io.BytesIO(generated_bytes))
+        generated_image.load()
+    except Exception:
+        generated_image = None
+
+    validation = None
+    if generated_image is not None:
+        t_eval = time.time()
+        validation = validate_generated_image(
+            reference_images=compressed_images,
+            generated_image=generated_image,
+            summary=summary,
+            style_name=style_name,
+            story=None,
+        )
+        print(f"[time] Independent eval: {time.time() - t_eval:.2f}s")
+
+    local_run_dir = None
+    local_image_path = None
+    local_json_path = None
+    if generated_bytes:
+        try:
+            local_run_dir, local_image_path, local_json_path = _save_local_run_artifacts(
+                image_bytes=generated_bytes,
+                summary=summary,
+                style_name=style_name,
+                prompt=prompt,
+                story=styled_story,
+                validation=validation,
+            )
+        except Exception as e:
+            print(f"[local_save] failed: {e}")
 
     print(f"[time] Total generate: {time.time() - t_start:.2f}s")
 
@@ -704,6 +862,10 @@ def generate():
         story_parallel_fallback=story_metrics.get("story_parallel_fallback"),
         image_prompt=_truncate_text(prompt),
         model_output_text=_truncate_text(response_text),
+        validation=validation,
+        local_run_dir=local_run_dir,
+        local_image_path=local_image_path,
+        local_json_path=local_json_path,
         generation_time=round(time.time() - t_gen, 2),
         total_time=round(time.time() - t_start, 2),
         output_image_base64=image_b64,
@@ -714,6 +876,54 @@ def generate():
         generation_time=round(time.time() - t_gen, 2),
         total_time=round(time.time() - t_start, 2),
         story=styled_story,
+        validation=validation,
+        local_run_dir=local_run_dir,
+        local_image_path=local_image_path,
+        local_json_path=local_json_path,
+        run_id=run_id,
+    )
+
+
+@app.route("/api/validate", methods=["POST"])
+def validate():
+    """Validate generated image against story and visual quality."""
+    t_start = time.time()
+
+    summary = request.form.get("summary", "")
+    style_name = request.form.get("style_name", "")
+    files = request.files.getlist("images")
+    generated_file = request.files.get("generated_image")
+
+    if not files or not files[0].filename:
+        return jsonify(error="Please upload at least one reference image."), 400
+    if not generated_file or not generated_file.filename:
+        return jsonify(error="Please upload the generated output image."), 400
+
+    compressed_images = _compress_uploaded_images(files)
+    generated_image = compress_image_from_file(generated_file)
+
+    validation = validate_generated_image(
+        reference_images=compressed_images,
+        generated_image=generated_image,
+        summary=summary,
+        style_name=style_name,
+        story=None,
+    )
+
+    print(f"[time] Total validate: {time.time() - t_start:.2f}s")
+    run_id = log_run(
+        "validate",
+        summary=summary,
+        filenames=[f.filename for f in files] + [generated_file.filename],
+        images=compressed_images + [generated_image],
+        style_name=style_name,
+        validation=validation,
+        total_time=round(time.time() - t_start, 2),
+    )
+
+    return jsonify(
+        validation=validation,
+        total_time=round(time.time() - t_start, 2),
         run_id=run_id,
     )
 

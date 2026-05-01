@@ -165,6 +165,13 @@
   </section>
   {% endif %}
 
+  {% if run.validation %}
+  <section>
+    <h2>Image validation (output)</h2>
+    <pre>{{ run.validation | tojson(indent=2) }}</pre>
+  </section>
+  {% endif %}
+
   {% if run.excluded %}
   <section>
     <h2>Excluded styles</h2>

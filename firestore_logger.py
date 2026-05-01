@@ -167,6 +167,7 @@ def log_run(
 
     scalar_keys = (
         "story",
+        "validation",
         "suggestion",
         "style_description",
         "style_name",

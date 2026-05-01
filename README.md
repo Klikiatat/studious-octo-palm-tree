@@ -19,6 +19,8 @@ Upload your photos and a short memory summary. The app generates a narrative sto
 4. Confirm or reject the suggestion (the app will suggest an alternative)
 5. On confirm, the app generates the final **artwork**
    - For Junk Journal and Comic Strip, the story narrative is fed into image generation for richer results
+6. After generation, an **independent eval agent** scores output quality + story alignment
+7. Generated image + eval JSON are auto-saved locally under `local_outputs/`
 
 ## Setup
 
@@ -32,6 +34,8 @@ Create a `.env` file:
 
 ```
 GEMINI_API_KEY=your_api_key_here
+# Optional: change local artifact save directory
+# LOCAL_OUTPUT_DIR=/absolute/path/for/outputs
 ```
 
 ### Firestore logging (optional)
@@ -114,3 +118,4 @@ tests/              pytest (e.g. test_firestore_connection.py — needs Firestor
 | `/api/suggest` | POST | Accepts images + summary. Returns story + style suggestion (+ `run_id` when logged) |
 | `/api/reject` | POST | Accepts images + summary + excluded styles. Returns new suggestion (+ `run_id`) |
 | `/api/generate` | POST | Accepts images + summary + style name. Returns base64 PNG (+ `run_id`) |
+| `/api/validate` | POST | Independent eval: accepts reference images + generated image (+ summary/style), returns quality/story scores |

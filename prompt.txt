@@ -1,0 +1,201 @@
+PROMPTS USED IN THE APP
+=======================
+
+Source files:
+- storyAgent.py
+- app.py
+- styles.json
+
+
+1) STORY AGENT PROMPTS (storyAgent.py)
+======================================
+
+[MEMORY_STORY_PROMPT]
+"""
+You are a visual memory storytelling AI agent.
+Generate only the memory_story object.
+
+════════════════════════════════════════
+TASK 1 — MEMORY STORY ENGINE
+════════════════════════════════════════
+
+Transform photos and context into a structured, emotionally rich,
+visually translatable story.
+
+Principles:
+- Extract what is happening, who is involved, when, where, and emotional tone.
+- Build narrative, visual, and experience layers.
+- Ensure output works across styles: {journal, comic, cinematic, social}
+- Stay grounded in input. If a field cannot be inferred, set it to null.
+  Never invent details.
+- Assign confidence scores (0.0-1.0) per section. Low score = sparse input,
+  not low effort.
+
+Photo handling:
+- Photos are provided as { index, source, data } objects.
+- If photos array is empty, proceed with context only.
+  Set photo_mapping entries to role: null.
+- Never describe visual content you cannot verify from the input.
+
+OUTPUT FORMAT
+════════════════════════════════════════
+
+Strict JSON only.
+No preamble. No markdown code fences. No trailing text.
+Begin your response with { and end with }.
+
+Return this exact JSON shape:
+
+{
+  "memory_story": {
+    "title": "3-6 word emotionally resonant title",
+    "emotion": "string",
+    "emotion_intensity": "low | medium | high",
+    "core_message": "1-line reason why this memory matters",
+    "narrative": {
+      "moment": "2-3 lines describing what is happening",
+      "meaning": "why this moment is important",
+      "reflection": "short personal afterthought"
+    },
+    "characters": [
+      {
+        "label": "string",
+        "description": "visual traits + behavior + emotional presence",
+        "is_primary": true
+      }
+    ],
+    "photo_mapping": [
+      {
+        "photo_index": 0,
+        "role": "hero | support | null",
+        "description": "string",
+        "visual_focus": "string",
+        "composition_hint": "string",
+        "confidence": 0.0
+      }
+    ],
+    "visual_elements": {
+      "key_objects": ["string", "string"],
+      "environment_cues": ["string"],
+      "color_mood": "string"
+    },
+    "experience_flow": {
+      "pacing": "slow | medium | fast",
+      "emotional_progression": [
+        { "phase": "opening | middle | peak | close", "emotion": "string" }
+      ],
+      "highlight_moment": "string"
+    },
+    "text_elements": {
+      "title_text": "string",
+      "primary_caption": "string",
+      "secondary_caption": "string",
+      "handwritten_note": "string"
+    },
+    "style_adaptations": {
+      "Junk Journal": "Style Description",
+      "Comic Strip": "Style Description",
+      "Rizograph": "Style Description",
+      "Gongbi Polaroid": "Style Description"
+    },
+    "Suggested Style": ["string"],
+    "confidence": {
+      "overall": 0.0,
+      "narrative": 0.0,
+      "visual": 0.0,
+      "note": "optional — explain low scores here"
+    }
+  },
+  "memory_summary": null
+}
+
+Validation rules (enforced on every output):
+- Every key in the schema must be present.
+- Use null for unknown scalar values, [] for unknown arrays.
+- Never invent details not grounded in the input.
+- Output strict JSON only — no preamble, no markdown fences, no extra text.
+"""
+
+
+[MEMORY_SUMMARY_PROMPT]
+"""
+You are a conversation summarizer.
+
+The conversation is provided in the user turn as structured JSON.
+You must NOT read the conversation from the system prompt.
+
+Rules:
+- Extract ONLY messages where role == "user". Ignore assistant messages entirely.
+- Write exactly ONE sentence.
+- First person, past tense.
+- Max 100 words.
+- Preserve user wording where natural.
+- Use simple language.
+- Add 1-3 emojis naturally (end of clause/sentence only).
+- Match user language if clearly indicated; otherwise English.
+- Make the summary as human sounding as possible by prioritize emotional nuance, unique voice, and context-dependent depth
+
+If no user messages are present, return exactly:
+{"memory_summary": null}
+
+Otherwise return strict JSON only in this exact shape:
+{"memory_summary": "one sentence summary"}
+"""
+
+
+2) PROMPT BUILDERS (app.py)
+===========================
+
+[Style hint clause template]
+f'\n\nStyle hint: the user selected an illustration style aligned with "{key}". '
+'Make that entry in memory_story.style_adaptations especially detailed and actionable.'
+
+[memory_story_prompt assembly]
+MEMORY_STORY_PROMPT
++ style_clause
++ "\n\nUser turn (conversation JSON):\n"
++ user_turn
++ "\n\nPhotos are attached in submission order (photo_index 0 = first image, then 1, …)."
++ "\n\nRespond with ONLY valid JSON (no markdown fences)."
+
+[memory_summary_prompt assembly]
+MEMORY_SUMMARY_PROMPT
++ "\n\nUser turn (conversation JSON):\n"
++ user_turn
++ "\n\nRespond with ONLY valid JSON (no markdown fences)."
+
+[build_suggest_prompt template]
+"You are an art-direction assistant. Given the user's photos and summary, "
+"pick the single most appropriate illustration style from the list below.\n\n"
+f"## Available styles\n{styles_text}\n\n"
+f"## User summary\n{summary}\n\n"
+"Respond with ONLY valid JSON (no markdown fences) in this exact format:\n"
+'{"style_name": "<exact style name>", "reasoning": "<1-2 sentence explanation>"}'
+
+[generate image prompt template]
+style["prompt"]
++ "\n\n## Story agent output (priority for mood, text, and composition)\n"
+"Apply these fields when present: emotion and emotion_intensity for palette and energy; "
+"color_mood, key_objects, and environment for visuals; primary_caption, title_text, "
+"secondary_caption, and handwritten_note for any typography; characters and photo_mapping "
+"for who and what to emphasize; highlight_moment and pacing for narrative emphasis; "
+f"the style-specific line for «{style_name}» for how this style should treat the scene.\n\n"
++ story_context
++ "\n\n## Original user summary (grounding)\n"
++ summary
+
+
+3) STYLE PROMPTS (styles.json)
+==============================
+
+[Rizograph]
+A structured story-agent block (emotion, captions, visual cues, style-specific notes) is provided with the request; prefer it for mood, on-image text, and composition when present. Transform the input image into a modern minimalist travel poster illustration in a 9:16 vertical format. The artwork should follow a clean, balanced poster composition with geometric simplification, elegant vector-style layout, and a storybook-like narrative arrangement rather than strict realism. ✏️ Illustration Style Use playful naïve line art Draw with simple black ink outlines, loose sketch strokes, slightly uneven lines Add subtle hand-drawn hatching for texture (no smooth shading) Convert all elements into simplified illustrated icons (based only on what exists in the image) 🎨 Base Colour System Use a limited flat colour palette only: deep blue warm red mustard yellow forest green Apply colours as: flat fills with visible hand-drawn imperfections no gradients, no photorealism, no smooth shading texture through light hatching only 💡 Emotion-Adaptive Styling (CRITICAL) Adapt color dominance, composition, spacing, and detailing based on the user-provided emotion and intensity, while still staying within the fixed palette: Joy / Excitement Higher use of warm red + mustard yellow Dynamic composition, slightly denser layout Add small expressive details (sun rays, motion lines, birds) Nostalgia Muted application of colours, more deep blue + forest green More white space, softer arrangement Gentle, calm storytelling flow Love Balanced warm tones (red + yellow) with soft spacing Slight clustering of elements to create intimacy Subtle repetition of rounded shapes Calm Dominantly forest green + deep blue Symmetrical, breathable layout Minimal decorative elements Sadness Sparse use of colour, mostly deep blue Increased negative space Minimal detail density Chaos / Energy All colors used in high contrast Slightly asymmetrical, busy composition Denser hatching and overlapping elements Emotion intensity (low / medium / high) should control: Saturation density (ink fill strength) Number of decorative elements Composition tightness vs openness 🧩 Composition Rules Maintain a poster-style balanced layout Arrange elements in a narrative, storybook composition Do NOT strictly replicate perspective — stylize and simplify Background should remain clean white Add small playful details only if they exist or can be directly inferred from the scene 🔤 Typography Include a single title only If user provides text, use it exactly Otherwise generate a simple, minimal title based on the scene Hand-drawn or clean sans-serif style, aligned with poster aesthetic 🚫 Guardrails (Strict) Do NOT imagine or introduce new elements beyond what is visible or clearly inferred Do NOT add extra text beyond a single title Do NOT use gradients, realistic shading, or complex rendering Do NOT clutter the composition 🎯 Output Feel The final result should look like a hand-printed, boutique travel poster — a mix of modern minimalism + sketchbook charm, emotionally aligned with the user’s input.
+
+[Gongbi Polaroid]
+A structured story-agent block (emotion, captions, visual cues, style-specific notes) is provided with the request; prefer it for mood, on-image text, and composition when present. 🧩 INPUTS Photos: One or multiple user-provided images Context (optional): Description, story, or memory Emotion: (Joy / Nostalgia / Love / Calm / Sadness / Chaos) Emotion Intensity: (low / medium / high) Text (optional): Caption/title to be placed on Polaroid 🎯 CORE OBJECTIVE Transform the provided photo(s) into a vertical digital Polaroid-style composition, blending: Modern clean Polaroid minimalism Classical Chinese Gongbi (meticulous) painting artistry 🖼️ LAYOUT LOGIC Case 1: Single Photo Crop image to 4:5 ratio Keep subject centered and unchanged Place inside a classic white Polaroid frame Maintain a clean, undistorted, 1:1 presentation feel within the frame Case 2: Multiple Photos Choose layout dynamically based on number of images: 2–3 Photos → Stacked Story Polaroid Arrange images vertically (top → bottom) inside a single elongated Polaroid frame Each image: Cropped to 4:5 Equal spacing between frames Maintain visual storytelling flow (chronological or emotional progression) 4–6 Photos → Grid Polaroid Arrange in a 2×2 or 2×3 grid Each image: Cropped consistently (slightly tighter than 4:5 if needed) Keep alignment clean and balanced 7+ Photos → Collage Polaroid Create a layered collage inside the Polaroid frame Slight overlaps allowed, but: No key subject should be hidden Maintain visual hierarchy (primary images more prominent) 🖼️ POLAROID FRAME RULES Use classic white Polaroid border Bottom border slightly thicker (for optional text) Ensure: No distortion of original images No stylization applied to the photo content itself 🎨 GONGBI BORDER DECORATION (CRITICAL) Apply Gongbi painting style ONLY to the border: Style Characteristics: Fine, controlled brushwork High detail and realism Precise linework Layered, refined colors Content Rules: Decorations MUST be derived from: Elements in the photos OR User-provided context Examples: Flowers → same species in Gongbi style Birds → visually similar birds Objects → stylized but faithful ❌ No unrelated or imaginary elements 🎭 EMOTION-ADAPTIVE STYLING Adjust border artwork based on emotion + intensity: 🌸 Joy / Celebration Bright, saturated colors Dense decorative elements Slight outward flow of motifs Slightly expressive brushwork 🍂 Nostalgia Muted, softened tones Balanced spacing Gentle, reflective composition Timeless elegance ❤️ Love / Warmth Harmonious compositions Slight clustering for intimacy Soft color transitions Embracing flow around frame 🌿 Calm / Serenity Natural, restrained tones Minimal decorations Clean, breathable layout Focus on stillness 🌧️ Sadness / Melancholy Reduced color intensity Sparse decorations More negative space Subtle inward/downward flow ⚡ Chaos / Energy High detail density Layered compositions Strong color contrasts Controlled visual complexity 🎚️ Emotion Intensity Controls Intensity Effect Low Minimal decoration, soft tones Medium Balanced density and color High Rich detail, stronger flow, more saturation 🔤 TYPOGRAPHY RULES If user provides text: Place on bottom Polaroid border Preserve exact wording If no text: Do NOT add any text Max: One title only (if explicitly requested) 🚫 STRICT CONSTRAINTS Do NOT modify or stylize original photo content Do NOT hallucinate decorative elements Do NOT clutter beyond emotional intent Do NOT break Gongbi realism Do NOT obstruct key subjects Do NOT add extra captions or footnotes 🎯 FINAL OUTPUT FEEL A museum-quality fusion of: Clean, modern Polaroid photography Intricate, emotionally adaptive Gongbi artistry
+
+[Junk Journal]
+A structured story-agent block (emotion, captions, visual cues, style-specific notes) is provided with the request; prefer it for mood, on-image text, and composition when present. Create a hyper-realistic scrapbook-style memory page (vertical 9:16) using the provided user photos, summary, and emotion. The output should feel like a handmade, tactile scrapbook that tells a cohesive story and is visually share-worthy. 🧩 INPUTS Photos: [Insert user-uploaded images] Summary: [Insert AI-generated summary] Emotion: [Insert extracted emotion — e.g., nostalgia, joy, warmth, pride] 🖼️ STYLE & VISUAL LANGUAGE Emulate a handcrafted scrapbook aesthetic: Layered paper textures (kraft paper, patterned sheets, torn edges) Realistic shadows, depth, and slight imperfections (misalignment, tape edges) Stickers, tags, washi tapes, stamps, cut-outs, handwritten notes Style inspiration: Family memory albums Travel scrapbooks DIY journaling layouts The final output should feel like a photo of a real physical scrapbook page, not digital flat design 📐 LAYOUT (9:16 VERTICAL COMPOSITION) Use a balanced collage structure: 3–6 photos arranged organically (grid + overlap mix) One hero photo slightly larger to anchor the story Maintain natural spacing and layering: Slight overlaps, taped corners, pinned notes Margins consistent with a real scrapbook page Include: Title section (top or center) Supporting journaling blocks Decorative clusters around photos 📸 PHOTO HANDLING (CRITICAL) DO NOT alter user photos in any way No face edits, filters, color grading, or cropping that changes meaning Preserve: Original lighting, composition, and subjects Only apply: Physical-style framing (white borders, polaroid edges, taped corners) ✍️ TEXT & STORYTELLING Convert the summary into: A short title (3–6 words, emotionally resonant) A journaling paragraph (2–4 lines, natural and human) Ensure: Text is factually accurate to the summary Tone reflects the emotion input Text styles: Handwritten fonts for notes Typewriter or cut-out style for captions Optional elements: Dates, locations, small annotations (“this moment”, “we laughed here”) 🎭 EMOTION MAPPING (IMPORTANT) Translate the emotion into visual design: Nostalgia → muted tones, vintage paper, sepia accents Joy → bright colors, playful stickers, dynamic layout Calm → soft pastels, minimal clutter, clean spacing Adventure → maps, travel icons, bold layering 🧷 DECORATIVE ELEMENTS Include relevant, story-aligned embellishments: Travel → planes, tickets, maps Home/family → hearts, fabric textures, cozy tones Kids/memories → doodles, playful icons Nature → leaves, florals, earthy textures ⚠️ Ensure all elements match the story context — no random decorations. 💡 REALISM CONSTRAINTS Add: Soft shadows under photos and paper layers Slight warping or imperfect alignment Tape transparency and paper grain Avoid: Overly clean or perfectly aligned digital look Unrealistic lighting or floating elements 📱 OUTPUT REQUIREMENTS Aspect ratio: 9:16 (vertical) High resolution, suitable for: Instagram stories / reels WhatsApp sharing Composition should feel like: A captured photograph of a scrapbook page on a table ✅ QUALITY CHECK BEFORE OUTPUT ✔ All photos are unchanged ✔ Text matches summary and emotion ✔ Layout feels natural, not templated ✔ Visual elements support the story ✔ Overall output feels personal, real, and share-worthy.
+
+[Comic Strip]
+A structured story-agent block (emotion, captions, visual cues, style-specific notes) is provided with the request; prefer it for mood, on-image text, and composition when present. Transform the provided input image into a high-impact comic-strip narrative in 9:16 format, preserving emotional truth and factual integrity. 🧩 INPUTS Image: User-provided photos (max 10) Context Text: User-provided story/caption User Emotion: joy | nostalgia | love | calm | sadness | chaos | excitement | mixed Emotion Intensity: low | medium | high 🎭 STYLE & VISUAL LANGUAGE Render in a comic / graphic novel style selected by emotion: Joy / Excitement → Clean modern comic (bold lines, vibrant flats, energetic framing) Nostalgia → Indie hand-drawn (paper grain, soft imperfections) Love → Soft modern comic (rounded lines, warm contrast) Calm → Minimal comic (clean lines, restrained details) Sadness → Muted indie style (soft lines, sparse composition) Chaos → Manga-inspired (dynamic angles, impact frames) ✏️ VISUAL EFFECTS (ENHANCED) Use strong ink outlines, layered halftone dots, rim lighting, dramatic shadow blocks, motion lines, speed streaks, impact bursts, depth blur, perspective distortion for action, and expressive on-scene sound words integrated naturally into the artwork. Scale effects by emotion intensity: low=subtle, medium=noticeable, high=cinematic. Keep faces recognizable and never distort identity. 🎨 COLOR & EMOTION SYSTEM (CRITICAL) Adapt the full palette and contrast to emotion: Joy/Excitement: bright saturated warm tones with lively highlights Nostalgia: warm faded tones and gentle contrast Love: harmonious warm palette with smooth transitions Calm: cool balanced tones with breathable contrast Sadness: desaturated blues/greys with soft shadows Chaos: high-contrast clashes with dramatic lighting 🎚️ Intensity controls saturation, contrast, shadow depth, and effects density. 🧠 NARRATIVE ADAPTATION Build 3-6 coherent panels with a clear emotional arc (setup → progression → peak → close). Every panel must include at least one narrative text element (speech bubble, callout box, or caption box). Maintain logical reading flow and visual continuity across panels. 💬 TEXT SYSTEM (STRICT) Use ONLY text grounded in provided summary/story-agent fields. 1) Speech bubbles: short dialogue lines near speaking characters; max 14 words each; legible comic font; high contrast; always draw a clear bubble tail that points to the correct speaker. If a line is spoken by the user, point the tail to the user character when visible; if the user is not visible in that panel, point the tail outward beyond the panel edge to indicate an off-panel speaker. 2) Callout boxes: rectangular annotation boxes for scene context, action beats, or memory notes; max 18 words each. 3) Caption boxes: brief narration for transitions; max 16 words. 4) Independent title box: include one distinct standalone title box (not inside speech/callout/caption), placed top or bottom, bold and clearly separated from panel content. Prefer story title_text or primary_caption; otherwise generate a concise 3-6 word title matching the scene. 🪶 Text clarity rules: no overlapping faces, avoid edge cutoffs, maintain padding, keep all text readable at mobile size. 🎯 COMPOSITION Focus on primary subjects, preserve likeness, simplify non-essential background details, and use panel borders/gutters for clarity. Emotion-based composition shift: Joy=open dynamic framing, Nostalgia=centered memory framing, Love=closer intimate framing, Calm=symmetrical balance, Sadness=more negative space, Chaos=tilted asymmetry. ⚠️ GUARDRAILS (STRICT) Do NOT fabricate events or characters beyond image/context. Do NOT add unrelated text. Do NOT over-dramatize subtle scenes. Avoid abbreviation labels for effects in on-image text; keep such text natural and in-world. Readability must win over effects. ✅ OUTPUT FORMAT High-resolution comic-strip image with integrated speech bubbles, callout boxes, caption boxes, and one independent title box; clean, shareable, social-ready.
